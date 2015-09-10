@@ -321,6 +321,7 @@ from .formula import * # is constrained by __all__
 from .book import Book, colname #### TODO #### formula also has `colname` (restricted to 256 cols)
 from .sheet import empty_cell
 from .xldate import XLDateError, xldate_as_tuple
+from .xlsx import X12Book
 
 if sys.version.startswith("IronPython"):
     # print >> sys.stderr, "...importing encodings"
@@ -399,7 +400,13 @@ def open_workbook(filename=None,
             zf = zipfile.ZipFile(timemachine.BYTES_IO(file_contents))
         else:
             zf = zipfile.ZipFile(filename)
-        component_names = zf.namelist()
+
+        # Workaround for some third party files that use forward slashes and
+        # lower case names. We map the expected name in lowercase to the
+        # actual filename in the zip container.
+        component_names = dict([(X12Book.convert_filename(name), name)
+                                for name in zf.namelist()])
+
         if verbosity:
             logfile.write('ZIP component_names:\n')
             pprint.pprint(component_names, logfile)

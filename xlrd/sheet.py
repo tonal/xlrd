@@ -458,6 +458,11 @@ class Sheet(BaseObject):
             ]
 
     ##
+    # Returns a generator for iterating through each row.
+    def get_rows(self):
+        return (self.row(index) for index in range(self.nrows))
+
+    ##
     # Returns a slice of the types
     # of the cells in the given row.
     def row_types(self, rowx, start_colx=0, end_colx=None):
@@ -572,6 +577,7 @@ class Sheet(BaseObject):
                 if chi > nc: nc = chi
             if nc > self.ncols:
                 self.ncols = nc
+                self._first_full_rowx = -2
             if nr > self.nrows:
                 # we put one empty cell at (nr-1,0) to make sure
                 # we have the right number of rows. The ragged rows
