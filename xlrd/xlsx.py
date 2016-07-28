@@ -7,6 +7,7 @@ from __future__ import print_function, unicode_literals
 
 DEBUG = 0
 
+from os.path import normpath, join
 import sys
 import re
 from .timemachine import *
@@ -75,9 +76,8 @@ for _x in "123456789":
     _UPPERCASE_1_REL_INDEX[_x] = 0
 del _x
 
-def cell_name_to_rowx_colx(
-    cell_name, letter_value=_UPPERCASE_1_REL_INDEX, allow_no_col=False
-):
+def cell_name_to_rowx_colx(cell_name, letter_value=_UPPERCASE_1_REL_INDEX,
+        allow_no_col=False):
     # Extract column index from cell name
     # A<row number> => 0, Z =>25, AA => 26, XFD => 16383
     colx = 0
@@ -529,6 +529,8 @@ class X12Sheet(X12General):
         self.rowx = -1 # We may need to count them.
         self.bk = sheet.book
         self.sst = self.bk._sharedstrings
+        self.relid2path = {}
+        self.relid2reltype = {}
         self.merged_cells = sheet.merged_cells
         self.warned_no_cell_name = 0
         self.warned_no_row_num = 0
@@ -550,6 +552,20 @@ class X12Sheet(X12General):
             elif elem.tag == U_SSML12 + "mergeCell":
                 self.do_merge_cell(elem)
         self.finish_off()
+
+    def process_rels(self, stream):
+        if self.verbosity >= 2:
+            fprintf(self.logfile, "\n=== Sheet Relationships ===\n")
+        tree = ET.parse(stream)
+        r_tag = U_PKGREL + 'Relationship'
+        for elem in tree.findall(r_tag):
+            rid = elem.get('Id')
+            target = elem.get('Target')
+            reltype = elem.get('Type').split('/')[-1]
+            if self.verbosity >= 2:
+                self.dumpout('Id=%r Type=%r Target=%r', rid, reltype, target)
+            self.relid2reltype[rid] = reltype
+            self.relid2path[rid] = normpath(join('xl/worksheets', target))
 
     def process_comments_stream(self, stream):
         root = ET.parse(stream).getroot()
@@ -590,7 +606,12 @@ class X12Sheet(X12General):
         # The ref attribute should be a cell range like "B1:D5".
         ref = elem.get('ref')
         if ref:
-            first_cell_ref, last_cell_ref = ref.split(':')
+            try:
+                first_cell_ref, last_cell_ref = ref.split(':')
+            except ValueError:
+                # encountered a single cell merge, e.g. "B3"
+                first_cell_ref = ref
+                last_cell_ref = ref
             first_rowx, first_colx = cell_name_to_rowx_colx(first_cell_ref)
             last_rowx, last_colx = cell_name_to_rowx_colx(last_cell_ref)
             self.merged_cells.append((first_rowx, last_rowx + 1,
@@ -704,8 +725,6 @@ class X12Sheet(X12General):
             elif cell_type == "b":
                 # b = boolean
                 # <v> child contains "0" or "1"
-                # Maybe the data should be converted with cnv_xsd_boolean;
-                # ECMA standard is silent; Excel 2007 writes 0 or 1
                 for child in cell_elem:
                     child_tag = child.tag
                     if child_tag == V_TAG:
@@ -714,7 +733,7 @@ class X12Sheet(X12General):
                         formula = cooked_text(self, child)
                     else:
                         bad_child_tag(child_tag)
-                self.sheet.put_cell(rowx, colx, XL_CELL_BOOLEAN, int(tvalue), xf_index)
+                self.sheet.put_cell(rowx, colx, XL_CELL_BOOLEAN, cnv_xsd_boolean(tvalue), xf_index)
             elif cell_type == "e":
                 # e = error
                 # <v> child contains e.g. "#REF!"
@@ -730,17 +749,23 @@ class X12Sheet(X12General):
                 self.sheet.put_cell(rowx, colx, XL_CELL_ERROR, value, xf_index)
             elif cell_type == "inlineStr":
                 # Not expected in files produced by Excel.
-                # Only possible child is <is>.
                 # It's a way of allowing 3rd party s/w to write text (including rich text) cells
                 # without having to build a shared string table
                 for child in cell_elem:
                     child_tag = child.tag
                     if child_tag == IS_TAG:
                         tvalue = get_text_from_si_or_is(self, child)
+                    elif child_tag == V_TAG:
+                        tvalue = child.text
+                    elif child_tag == F_TAG:
+                        formula = child.text
                     else:
                         bad_child_tag(child_tag)
-                assert tvalue is not None
-                self.sheet.put_cell(rowx, colx, XL_CELL_TEXT, tvalue, xf_index)
+                if not tvalue:
+                    if self.bk.formatting_info:
+                        self.sheet.put_cell(rowx, colx, XL_CELL_BLANK, '', xf_index)
+                else:
+                    self.sheet.put_cell(rowx, colx, XL_CELL_TEXT, tvalue, xf_index)
             else:
                 raise Exception("Unknown cell type %r in rowx=%d colx=%d" % (cell_type, rowx, colx))
 
@@ -810,11 +835,20 @@ def open_workbook_2007_xml(
         heading = "Sheet %r (sheetx=%d) from %r" % (sheet.name, sheetx, fname)
         x12sheet.process_stream(zflo, heading)
         del zflo
-        comments_fname = 'xl/comments%d.xml' % (sheetx + 1)
-        if comments_fname in component_names:
-            comments_stream = zf.open(component_names[comments_fname])
-            x12sheet.process_comments_stream(comments_stream)
-            del comments_stream
+
+        rels_fname = 'xl/worksheets/_rels/%s.rels' % fname.rsplit('/', 1)[-1]
+        if rels_fname in component_names:
+            zfrels = zf.open(rels_fname)
+            x12sheet.process_rels(zfrels)
+            del zfrels
+
+        for relid, reltype in x12sheet.relid2reltype.items():
+            if reltype == 'comments':
+                comments_fname = x12sheet.relid2path.get(relid)
+                if comments_fname and comments_fname in component_names:
+                    comments_stream = zf.open(comments_fname)
+                    x12sheet.process_comments_stream(comments_stream)
+                    del comments_stream
 
         sheet.tidy_dimensions()
 

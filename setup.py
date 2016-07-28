@@ -1,19 +1,4 @@
-#!/usr/bin/env python
-
-from os import path
-import sys
-python_version = sys.version_info[:2]
-
-if python_version < (2, 6):
-    raise Exception("This version of xlrd requires Python 2.6 or above. "
-                    "For older versions of Python, you can use the 0.8 series.")
-
-av = sys.argv
-if len(av) > 1 and av[1].lower() == "--egg":
-    del av[1]
-    from setuptools import setup
-else:
-    from distutils.core import setup
+from setuptools import setup
 
 from xlrd.info import __VERSION__
 
@@ -35,10 +20,16 @@ setup(
                 ],
 
             },
-    description = 'Library for developers to extract data from Microsoft Excel (tm) spreadsheet files',
-    long_description = \
-        "Extract data from Excel spreadsheets (.xls and .xlsx, versions 2.0 onwards) on any platform. " \
-        "Pure Python (2.6, 2.7, 3.2+). Strong support for Excel dates. Unicode-aware.",
+    description = (
+        'Library for developers to extract data from '
+        'Microsoft Excel (tm) spreadsheet files'
+    ),
+    long_description = (
+        "Extract data from Excel spreadsheets "
+        "(.xls and .xlsx, versions 2.0 onwards) on any platform. "
+        "Pure Python (2.6, 2.7, 3.3+). "
+        "Strong support for Excel dates. Unicode-aware."
+    ),
     platforms = ["Any platform -- don't need Windows"],
     license = 'BSD',
     keywords = ['xls', 'excel', 'spreadsheet', 'workbook'],
@@ -54,4 +45,6 @@ setup(
             'Topic :: Office/Business',
             'Topic :: Software Development :: Libraries :: Python Modules',
             ],
-    )
+    zip_safe=False,
+    include_package_data=True
+)
